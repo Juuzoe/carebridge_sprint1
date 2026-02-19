@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+
+<p><a href="{{ url_for('history') }}">View history</a></p>
+
+<h2>Schedules</h2>
+<ul>
+  {% for sid, s in schedules.items() %}
+    <li>
+      <strong>{{ s.med_name }}</strong> — {{ s.dosage }} ({{ s.time_of_day }})
+      — <a href="{{ url_for('reminder', schedule_id=sid) }}">Open reminder</a>
+    </li>
+  {% endfor %}
+</ul>
+
+{% endblock %}

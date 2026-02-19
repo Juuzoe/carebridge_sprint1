@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>CareBridge Sprint 1</title>
+</head>
+<body>
+  <h1>CareBridge Sprint 1</h1>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <p><strong>Messages:</strong></p>
+      <ul>
+        {% for m in messages %}
+          <li>{{ m }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <hr>
+  {% block content %}{% endblock %}
+</body>
+</html>

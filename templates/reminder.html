@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Reminder</h2>
+
+<p><strong>{{ sched.med_name }}</strong></p>
+<p>Dosage: {{ sched.dosage }}</p>
+<p>Time of day: {{ sched.time_of_day }}</p>
+
+<form method="post">
+  {{ form.hidden_tag() }}
+
+  <p>
+    {{ form.username.label }}<br>
+    {{ form.username(size=30) }}
+  </p>
+
+  <p>{{ form.taken() }}</p>
+  <p>{{ form.skipped() }}</p>
+  <p>{{ form.remind_later() }}</p>
+</form>
+
+<p><a href="{{ url_for('home') }}">Back</a></p>
+
+{% endblock %}
