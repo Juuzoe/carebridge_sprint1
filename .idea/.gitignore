@@ -1,10 +1,15 @@
-# Default ignored files
-/shelf/
-/workspace.xml
-# Editor-based HTTP Client requests
-/httpRequests/
-# Ignored default folder with query files
-/queries/
-# Datasource local storage ignored files
-/dataSources/
-/dataSources.local.xml
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Flask
+instance/
+
+# Logs / runtime data
+static/dose_logs.json
+
+# PyCharm
+.idea/
+*.iml
