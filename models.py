@@ -1,18 +1,24 @@
-from extensions import db
-import sqlalchemy.orm as so
-import sqlalchemy as sa
+from datetime import datetime, time
 from typing import Optional
-from werkzeug.security import generate_password_hash, check_password_hash
+
+import sqlalchemy as sa
+import sqlalchemy.orm as so
 from flask_login import UserMixin
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from extensions import db
 
 
 class User(db.Model, UserMixin):
-    __tablename__ = "user"
-
     id: so.Mapped[int] = so.mapped_column(primary_key=True)
-    username: so.Mapped[str] = so.mapped_column(sa.String(63), index=True, unique=True)
-    email: so.Mapped[str] = so.mapped_column(sa.String(119), index=True, unique=True)
-    password_hash: so.Mapped[Optional[str]] = so.mapped_column(sa.String(255), nullable=True)
+    username: so.Mapped[str] = so.mapped_column(sa.String(63), unique=True, index=True)
+    email: so.Mapped[str] = so.mapped_column(sa.String(119), unique=True, index=True)
+    password_hash: so.Mapped[Optional[str]] = so.mapped_column(sa.String(255))
+
+    schedules: so.Mapped[list["MedicationSchedule"]] = so.relationship(back_populates="user")
+    reminders: so.Mapped[list["ReminderPrompt"]] = so.relationship(back_populates="user")
+    notifications: so.Mapped[list["ReminderNotification"]] = so.relationship(back_populates="user")
+    dose_logs: so.Mapped[list["DoseLog"]] = so.relationship(back_populates="user")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -21,36 +27,82 @@ class User(db.Model, UserMixin):
         return check_password_hash(self.password_hash, password)
 
 
-class Schedule(db.Model):
-    __tablename__ = "schedule"
+class MedicationSchedule(db.Model):
+    __tablename__ = "medication_schedule"
 
-    id = db.Column(db.Integer, primary_key=True)
-    med_name = db.Column(db.String(80), nullable=False)
-    dosage = db.Column(db.String(80), nullable=False)
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("user.id"), index=True)
+    med_name: so.Mapped[str] = so.mapped_column(sa.String(80))
+    dosage: so.Mapped[str] = so.mapped_column(sa.String(80))
+    scheduled_time: so.Mapped[time] = so.mapped_column(sa.Time())
+    email: so.Mapped[Optional[str]] = so.mapped_column(sa.String(119), nullable=True)
+    active: so.Mapped[bool] = so.mapped_column(sa.Boolean(), default=True)
+    created_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime(), default=datetime.now)
+    updated_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime(), default=datetime.now, onupdate=datetime.now)
 
-    # Must be stored as HH:MM, e.g. "08:00", "20:30"
-    time_of_day = db.Column(db.String(5), nullable=False)
+    user: so.Mapped[User] = so.relationship(back_populates="schedules")
+    reminders: so.Mapped[list["ReminderPrompt"]] = so.relationship(back_populates="schedule", cascade="all, delete-orphan")
+    dose_logs: so.Mapped[list["DoseLog"]] = so.relationship(back_populates="schedule", cascade="all, delete-orphan")
+
+
+class ReminderPrompt(db.Model):
+    __tablename__ = "reminder_prompt"
+
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("user.id"), index=True)
+    schedule_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("medication_schedule.id"), index=True)
+    parent_id: so.Mapped[Optional[int]] = so.mapped_column(sa.ForeignKey("reminder_prompt.id"), nullable=True)
+    dose_date: so.Mapped[str] = so.mapped_column(sa.String(10), index=True)
+    stage: so.Mapped[str] = so.mapped_column(sa.String(20))
+    status: so.Mapped[str] = so.mapped_column(sa.String(20), index=True)
+    due_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime(), index=True)
+    original_due_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime())
+    expires_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime())
+    created_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime(), default=datetime.now)
+    responded_at: so.Mapped[Optional[datetime]] = so.mapped_column(sa.DateTime(), nullable=True)
+    email_sent_at: so.Mapped[Optional[datetime]] = so.mapped_column(sa.DateTime(), nullable=True)
+
+    user: so.Mapped[User] = so.relationship(back_populates="reminders")
+    schedule: so.Mapped[MedicationSchedule] = so.relationship(back_populates="reminders")
+    parent: so.Mapped[Optional["ReminderPrompt"]] = so.relationship(remote_side=[id])
+    notifications: so.Mapped[list["ReminderNotification"]] = so.relationship(back_populates="reminder", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        sa.UniqueConstraint("schedule_id", "dose_date", "stage", name="uq_schedule_dose_stage"),
+    )
+
+
+class ReminderNotification(db.Model):
+    __tablename__ = "reminder_notification"
+
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("user.id"), index=True)
+    reminder_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("reminder_prompt.id"), index=True)
+    channel: so.Mapped[str] = so.mapped_column(sa.String(20))
+    message: so.Mapped[str] = so.mapped_column(sa.String(255))
+    created_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime(), default=datetime.now, index=True)
+
+    user: so.Mapped[User] = so.relationship(back_populates="notifications")
+    reminder: so.Mapped[ReminderPrompt] = so.relationship(back_populates="notifications")
 
 
 class DoseLog(db.Model):
     __tablename__ = "dose_log"
 
-    id = db.Column(db.Integer, primary_key=True)
-    when = db.Column(db.DateTime, nullable=False)
-    day = db.Column(db.String(10), nullable=False)
-    schedule_id = db.Column(db.Integer, db.ForeignKey("schedule.id"), nullable=False, index=True)
-    username = db.Column(db.String(80), nullable=False)
-    status = db.Column(db.String(20), nullable=False)
+    id: so.Mapped[int] = so.mapped_column(primary_key=True)
+    user_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("user.id"), index=True)
+    schedule_id: so.Mapped[int] = so.mapped_column(sa.ForeignKey("medication_schedule.id"), index=True)
+    reminder_id: so.Mapped[Optional[int]] = so.mapped_column(sa.ForeignKey("reminder_prompt.id"), nullable=True)
+    dose_date: so.Mapped[str] = so.mapped_column(sa.String(10), index=True)
+    scheduled_for: so.Mapped[datetime] = so.mapped_column(sa.DateTime())
+    logged_at: so.Mapped[datetime] = so.mapped_column(sa.DateTime(), default=datetime.now, index=True)
+    status: so.Mapped[str] = so.mapped_column(sa.String(20))
 
-    schedule = db.relationship("Schedule", backref="dose_logs")
+    user: so.Mapped[User] = so.relationship(back_populates="dose_logs")
+    schedule: so.Mapped[MedicationSchedule] = so.relationship(back_populates="dose_logs")
+
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "schedule_id", "dose_date", name="uq_user_schedule_dose_date"),
+    )
 
 
-DEFAULT_SCHEDULES = [
-    {"med_name": "Aspirin", "dosage": "1 tablet", "time_of_day": "08:00"},
-    {"med_name": "Vitamin D", "dosage": "1 capsule", "time_of_day": "20:00"},
-]
-
-
-def seed_schedules():
-    for row in DEFAULT_SCHEDULES:
-        db.session.add(Schedule(**row))
