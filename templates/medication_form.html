@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card" style="max-width:640px;">
+  <h2>{{ "Add Medication" if mode == "add" else "Edit Medication" }}</h2>
+  <form method="post" novalidate>
+    {{ form.hidden_tag() }}
+    <div class="field">
+      {{ form.med_name.label }}
+      {{ form.med_name(size=40) }}
+      {% for error in form.med_name.errors %}
+        <span class="muted">{{ error }}</span>
+      {% endfor %}
+    </div>
+    <div class="field">
+      {{ form.dosage.label }}
+      {{ form.dosage(size=40) }}
+      {% for error in form.dosage.errors %}
+        <span class="muted">{{ error }}</span>
+      {% endfor %}
+    </div>
+    <div class="field">
+      {{ form.scheduled_time.label }}
+      {{ form.scheduled_time() }}
+      {% for error in form.scheduled_time.errors %}
+        <span class="muted">{{ error }}</span>
+      {% endfor %}
+    </div>
+    <div class="field">
+      {{ form.email.label }}
+      {{ form.email(size=64, placeholder="Defaults to your account email") }}
+      {% for error in form.email.errors %}
+        <span class="muted">{{ error }}</span>
+      {% endfor %}
+    </div>
+    <div class="field checkbox">
+      {{ form.active() }}
+      {{ form.active.label }}
+    </div>
+    <div class="actions">
+      {{ form.submit(class_="button button-primary") }}
+      <a class="button" href="{{ url_for('home') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}
