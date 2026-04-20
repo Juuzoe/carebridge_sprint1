@@ -7,6 +7,16 @@
 <p>Dosage: {{ sched.dosage }}</p>
 <p>Time of day: {{ sched.time_of_day }}</p>
 
+{% if event %}
+  <p><strong>Reminder type:</strong>
+    {% if event.event_type == "first_prompt" %}
+      Initial reminder
+    {% else %}
+      Follow-up reminder
+    {% endif %}
+  </p>
+{% endif %}
+
 <form method="post">
   {{ form.hidden_tag() }}
 
@@ -16,8 +26,10 @@
   </p>
 
   <p>{{ form.taken() }}</p>
-  <p>{{ form.skipped() }}</p>
-  <p>{{ form.remind_later() }}</p>
+
+  {% if allow_remind_later %}
+    <p>{{ form.remind_later() }}</p>
+  {% endif %}
 </form>
 
 <p><a href="{{ url_for('home') }}">Back</a></p>
