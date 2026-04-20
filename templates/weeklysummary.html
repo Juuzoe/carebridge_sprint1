@@ -1,22 +1,44 @@
 {% extends "base.html" %}
-
 {% block content %}
 
-<h1>Weekly Medication Summary</h1>
+<div class="card" style="max-width:720px;">
+  <h2>Weekly Medication Summary</h2>
+  {% if summary.period_start and summary.period_end %}
+    <p class="muted">Current 7-day cycle: {{ summary.period_start }} to {{ summary.period_end }}</p>
+  {% else %}
+    <p class="muted">Add your first medication schedule to begin the weekly summary cycle.</p>
+  {% endif %}
+  <table>
+    <tbody>
+      <tr>
+        <th>Total doses</th>
+        <td>{{ summary.total }}</td>
+      </tr>
+      <tr>
+        <th>Taken</th>
+        <td>{{ summary.taken }}</td>
+      </tr>
+      <tr>
+        <th>Missed</th>
+        <td>{{ summary.missed }}</td>
+      </tr>
+      <tr>
+        <th>Escalations</th>
+        <td>{{ summary.escalations }}</td>
+      </tr>
+      <tr>
+        <th>Adherence</th>
+        <td><strong>{{ summary.adherence }}%</strong></td>
+      </tr>
+    </tbody>
+  </table>
 
-<ul>
-    <li>Total doses: {{ summary.total }}</li>
-    <li>Taken: {{ summary.taken }}</li>
-    <li>Missed: {{ summary.missed }}</li>
-    <li>Escalations: {{ summary.escalations }}</li>
-</ul>
-
-<p><strong>Adherence: {{ summary.adherence }}%</strong></p>
-
-<hr>
-
-<form action="{{ url_for('share_report') }}" method="get">
-    <button type="submit">Download Report (.txt)</button>
-</form>
+  <div class="actions" style="margin-top:18px;">
+    <form action="{{ url_for('share_report') }}" method="get">
+      <button class="button button-primary" type="submit">Download report</button>
+    </form>
+    <a class="button" href="{{ url_for('home') }}">Back to dashboard</a>
+  </div>
+</div>
 
 {% endblock %}
