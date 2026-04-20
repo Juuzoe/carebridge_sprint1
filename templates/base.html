@@ -3,22 +3,87 @@
 <head>
   <meta charset="utf-8">
   <title>CareBridge Sprint 1</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    .flash-box {
+      background: #f4f4f4;
+      border: 1px solid #ccc;
+      padding: 12px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+    }
+
+    .notification-popup {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      width: 320px;
+      background: #fff4f4;
+      border: 2px solid #d9534f;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+      z-index: 9999;
+    }
+
+    .notification-popup h3 {
+      margin-top: 0;
+      margin-bottom: 10px;
+      color: #b02a37;
+    }
+
+    .notification-popup p {
+      margin-bottom: 12px;
+    }
+
+    .notification-popup a {
+      display: inline-block;
+      padding: 8px 14px;
+      background: #d9534f;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+    }
+
+    .page-content {
+      margin-top: 20px;
+    }
+  </style>
 </head>
 <body>
   <h1>CareBridge Sprint 1</h1>
 
   {% with messages = get_flashed_messages() %}
     {% if messages %}
-      <p><strong>Messages:</strong></p>
-      <ul>
-        {% for m in messages %}
-          <li>{{ m }}</li>
-        {% endfor %}
-      </ul>
+      <div class="flash-box">
+        <p><strong>Messages:</strong></p>
+        <ul>
+          {% for m in messages %}
+            <li>{{ m }}</li>
+          {% endfor %}
+        </ul>
+      </div>
     {% endif %}
   {% endwith %}
 
+  {% if current_user.is_authenticated and active_notifications is defined and active_notifications %}
+    {% for notification in active_notifications %}
+      <div class="notification-popup">
+        <h3>Medication Reminder</h3>
+        <p>{{ notification.message }}</p>
+        <a href="{{ url_for('open_notification', notification_id=notification.id) }}">Open reminder</a>
+      </div>
+    {% endfor %}
+  {% endif %}
+
   <hr>
-  {% block content %}{% endblock %}
+
+  <div class="page-content">
+    {% block content %}{% endblock %}
+  </div>
 </body>
 </html>
