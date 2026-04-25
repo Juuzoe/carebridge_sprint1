@@ -1,21 +1,22 @@
+import os
 from secrets import token_hex
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
 
-from config import Config
 from core import (
     clear_user_logs,
     complete_today_exercise,
     format_datetime,
     get_active_reminders,
-    get_recent_notifications,
-    get_status_notifications,
     get_daily_status,
     get_exercise_logs,
-    get_user_logs,
+    get_recent_notifications,
+    get_schedule_active_reminder,
+    get_status_notifications,
     get_weekly_exercise_summary,
     get_weekly_summary,
+    load_logs,
     local_now,
     mark_reminder_skipped,
     mark_reminder_taken,
@@ -23,16 +24,28 @@ from core import (
     snooze_reminder,
 )
 from extensions import db, mail
-from forms import AccountSettingsForm, LoginForm, MedicationForm, RegistrationForm
+from forms import AccountSettingsForm, ConfirmDoseForm, LoginForm, MedicationForm, RegistrationForm
 from mailer import send_gp_summary
-from models import MedicationSchedule, User
+from models import Schedule, User, seed_schedules
 
 
 app = Flask(__name__)
-app.config.from_object(Config)
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key")
 
-db.init_app(app)
+basedir = os.path.abspath(os.path.dirname(__file__))
+instance_dir = os.path.join(basedir, "instance")
+os.makedirs(instance_dir, exist_ok=True)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(instance_dir, "carebridge.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAIL_SERVER"] = os.environ.get("MAIL_SERVER", "127.0.0.1")
+app.config["MAIL_PORT"] = int(os.environ.get("MAIL_PORT", "8025"))
+app.config["MAIL_USE_TLS"] = False
+app.config["MAIL_USE_SSL"] = False
+app.config["MAIL_DEFAULT_SENDER"] = os.environ.get("MAIL_DEFAULT_SENDER", "noreply@carebridge.com")
+
 mail.init_app(app)
+db.init_app(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
@@ -58,6 +71,10 @@ def create_database_tables():
         db.create_all()
 
 
+def ensure_db():
+    create_database_tables()
+
+
 def check_reminders():
     run_reminder_engine()
 
@@ -77,7 +94,21 @@ def make_sure_user_has_carer_code(user):
         db.session.commit()
 
 
-create_database_tables()
+def get_schedules_dict(user_id):
+    out = {}
+
+    for schedule in Schedule.query.filter_by(user_id=user_id).order_by(Schedule.id).all():
+        out[schedule.id] = {
+            "med_name": schedule.med_name,
+            "dosage": schedule.dosage,
+            "time_of_day": schedule.time_of_day,
+            "active": schedule.active,
+        }
+
+    return out
+
+
+ensure_db()
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -88,14 +119,9 @@ def login():
     form = LoginForm()
 
     if form.validate_on_submit():
-        username = form.username.data.strip()
-        user = User.query.filter_by(username=username).first()
+        user = User.query.filter_by(username=form.username.data.strip()).first()
 
-        if user is None:
-            flash("Invalid username or password.")
-            return redirect(url_for("login"))
-
-        if not user.check_password(form.password.data):
+        if user is None or not user.check_password(form.password.data):
             flash("Invalid username or password.")
             return redirect(url_for("login"))
 
@@ -125,13 +151,13 @@ def register():
         user = User(
             username=form.username.data.strip(),
             email=form.email.data.strip(),
+            carer_code=make_carer_code(),
         )
         user.set_password(form.password.data)
-        user.carer_code = make_carer_code()
-
         db.session.add(user)
         db.session.commit()
-
+        seed_schedules(user.id)
+        db.session.commit()
         flash("Registration complete. You can sign in now.")
         return redirect(url_for("login"))
 
@@ -143,10 +169,7 @@ def register():
 def home():
     check_reminders()
 
-    schedules = MedicationSchedule.query.filter_by(user_id=current_user.id).order_by(
-        MedicationSchedule.scheduled_time.asc(),
-        MedicationSchedule.med_name.asc(),
-    ).all()
+    schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.scheduled_time.asc()).all()
     reminders = get_active_reminders(current_user.id)
     notifications = get_recent_notifications(current_user.id)
     daily_status = get_daily_status(current_user.id)
@@ -156,6 +179,7 @@ def home():
         title="Home",
         now=format_datetime(local_now()),
         schedules=schedules,
+        schedules_dict=get_schedules_dict(current_user.id),
         reminders=reminders,
         notifications=notifications,
         daily_status=daily_status,
@@ -173,7 +197,6 @@ def account_settings():
         current_user.carer_email = form.carer_email.data.strip()
         current_user.gp_email = form.gp_email.data.strip()
         db.session.commit()
-
         flash("Account contact details updated.")
         return redirect(url_for("account_settings"))
 
@@ -211,32 +234,25 @@ def create_medication():
     form = MedicationForm()
 
     if form.validate_on_submit():
-        schedule = MedicationSchedule(
+        schedule = Schedule(
             user_id=current_user.id,
             med_name=form.med_name.data.strip(),
             dosage=form.dosage.data.strip(),
             scheduled_time=form.scheduled_time.data,
             active=form.active.data,
         )
-
         db.session.add(schedule)
         db.session.commit()
-
         flash("Medication schedule added.")
         return redirect(url_for("home"))
 
-    return render_template(
-        "medication_form.html",
-        title="Add Medication",
-        form=form,
-        mode="add",
-    )
+    return render_template("medication_form.html", title="Add Medication", form=form, mode="add")
 
 
 @app.route("/medications/<int:schedule_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_medication(schedule_id):
-    schedule = MedicationSchedule.query.get(schedule_id)
+    schedule = Schedule.query.get(schedule_id)
 
     if schedule is None or schedule.user_id != current_user.id:
         flash("Medication not found.")
@@ -249,24 +265,17 @@ def edit_medication(schedule_id):
         schedule.dosage = form.dosage.data.strip()
         schedule.scheduled_time = form.scheduled_time.data
         schedule.active = form.active.data
-
         db.session.commit()
-
         flash("Medication schedule updated.")
         return redirect(url_for("home"))
 
-    return render_template(
-        "medication_form.html",
-        title="Edit Medication",
-        form=form,
-        mode="edit",
-    )
+    return render_template("medication_form.html", title="Edit Medication", form=form, mode="edit")
 
 
 @app.route("/medications/<int:schedule_id>/delete", methods=["POST"])
 @login_required
 def delete_medication(schedule_id):
-    schedule = MedicationSchedule.query.get(schedule_id)
+    schedule = Schedule.query.get(schedule_id)
 
     if schedule is None or schedule.user_id != current_user.id:
         flash("Medication not found.")
@@ -274,85 +283,73 @@ def delete_medication(schedule_id):
 
     db.session.delete(schedule)
     db.session.commit()
-
     flash("Medication schedule deleted.")
     return redirect(url_for("home"))
+
+
+@app.route("/reminder/<int:schedule_id>")
+@login_required
+def reminder(schedule_id):
+    check_reminders()
+
+    reminder_item = get_schedule_active_reminder(schedule_id, current_user.id)
+    if reminder_item is None:
+        flash("There is no active reminder for that medication right now.")
+        return redirect(url_for("home"))
+
+    return redirect(url_for("reminder_detail", reminder_id=reminder_item.id))
 
 
 @app.route("/reminders/<int:reminder_id>")
 @login_required
 def reminder_detail(reminder_id):
     check_reminders()
+    reminder_item = next((item for item in get_active_reminders(current_user.id) if item.id == reminder_id), None)
 
-    reminder = None
-    reminders = get_active_reminders(current_user.id)
-
-    for item in reminders:
-        if item.id == reminder_id:
-            reminder = item
-
-    if reminder is None:
+    if reminder_item is None:
         flash("Reminder not found or no longer active.")
         return redirect(url_for("home"))
 
-    return render_template("reminder.html", title="Reminder", reminder=reminder)
-
-
-@app.route("/reminder/<int:schedule_id>")
-@login_required
-def legacy_schedule_reminder(schedule_id):
-    check_reminders()
-
-    reminder = None
-    reminders = get_active_reminders(current_user.id)
-
-    for item in reminders:
-        if item.schedule_id == schedule_id:
-            reminder = item
-
-    if reminder is None:
-        flash("There is no active reminder for that medication right now.")
-        return redirect(url_for("home"))
-
-    return redirect(url_for("reminder_detail", reminder_id=reminder.id))
+    form = ConfirmDoseForm()
+    return render_template("reminder.html", title="Reminder", reminder=reminder_item, form=form)
 
 
 @app.route("/reminders/<int:reminder_id>/taken", methods=["POST"])
 @login_required
 def reminder_taken(reminder_id):
-    reminder = mark_reminder_taken(reminder_id, current_user.id)
+    reminder_item = mark_reminder_taken(reminder_id, current_user.id)
 
-    if reminder is None:
+    if reminder_item is None:
         flash("Reminder could not be updated.")
     else:
-        flash("Your response has been recorded.")
+        flash("Recorded: Taken.")
 
-    return redirect(url_for("home"))
+    return redirect(url_for("history"))
 
 
 @app.route("/reminders/<int:reminder_id>/skipped", methods=["POST"])
 @login_required
 def reminder_skipped(reminder_id):
-    reminder = mark_reminder_skipped(reminder_id, current_user.id)
+    reminder_item = mark_reminder_skipped(reminder_id, current_user.id)
 
-    if reminder is None:
+    if reminder_item is None:
         flash("Reminder could not be marked as skipped.")
     else:
-        flash("The medication was recorded as skipped.")
+        flash("Recorded: Skipped.")
 
-    return redirect(url_for("home"))
+    return redirect(url_for("history"))
 
 
 @app.route("/reminders/<int:reminder_id>/remind-later", methods=["POST"])
 @login_required
 def reminder_later(reminder_id):
     minutes = request.form.get("minutes", type=int)
-    reminder = snooze_reminder(reminder_id, current_user.id, minutes)
+    reminder_item = snooze_reminder(reminder_id, current_user.id, minutes)
 
-    if reminder is None:
+    if reminder_item is None:
         flash("Unable to schedule a later reminder.")
     else:
-        flash(f"Reminder moved to {format_datetime(reminder.due_at)}.")
+        flash(f"Recorded: Remind me later. New reminder due at {format_datetime(reminder_item.due_at)}.")
 
     return redirect(url_for("home"))
 
@@ -361,9 +358,16 @@ def reminder_later(reminder_id):
 @login_required
 def history():
     check_reminders()
-
-    logs = get_user_logs(current_user.id)
+    logs = load_logs(current_user.id)
     return render_template("history.html", title="History", logs=logs)
+
+
+@app.route("/history/clear", methods=["GET", "POST"])
+@login_required
+def clear_history():
+    clear_user_logs(current_user.id)
+    flash("History cleared.")
+    return redirect(url_for("history"))
 
 
 @app.route("/exercise")
@@ -436,49 +440,28 @@ def api_carer_status(carer_code):
 
     check_reminders()
 
-    daily_status = get_daily_status(user.id)
-    medication_summary = get_weekly_summary(user.id)
-    exercise_summary = get_weekly_exercise_summary(user.id)
-
     return jsonify(
         {
             "patient": user.username,
-            "medications": daily_status,
-            "weekly_medication_summary": medication_summary,
-            "weekly_exercise_summary": exercise_summary,
+            "medications": get_daily_status(user.id),
+            "weekly_medication_summary": get_weekly_summary(user.id),
+            "weekly_exercise_summary": get_weekly_exercise_summary(user.id),
         }
     )
-
-
-@app.route("/history/clear", methods=["POST"])
-@login_required
-def clear_history():
-    clear_user_logs(current_user.id)
-
-    flash("History cleared.")
-    return redirect(url_for("history"))
 
 
 @app.route("/weekly-summary/view")
 @login_required
 def weekly_summary_view():
     check_reminders()
-
     summary = get_weekly_summary(current_user.id)
     exercise_summary = get_weekly_exercise_summary(current_user.id)
-    return render_template(
-        "weekly_summary.html",
-        title="Weekly Summary",
-        summary=summary,
-        exercise_summary=exercise_summary,
-    )
+    return render_template("weeklysummary.html", title="Weekly Summary", summary=summary, exercise_summary=exercise_summary)
 
 
 @app.route("/share-report")
 @login_required
 def share_report():
-    check_reminders()
-
     summary = get_weekly_summary(current_user.id)
     report = (
         "Weekly Medication Summary\n\n"
@@ -486,7 +469,7 @@ def share_report():
         f"Total doses: {summary['total']}\n"
         f"Taken: {summary['taken']}\n"
         f"Missed: {summary['missed']}\n"
-        f"Follow-ups or snoozes: {summary['escalations']}\n"
+        f"Escalations: {summary['escalations']}\n"
         f"Adherence: {summary['adherence']}%\n"
     )
 
@@ -499,8 +482,6 @@ def share_report():
 @app.route("/share-report/email-gp", methods=["POST"])
 @login_required
 def email_gp_report():
-    check_reminders()
-
     if not current_user.gp_email:
         flash("Please add a GP email address in account settings first.")
         return redirect(url_for("weekly_summary_view"))
@@ -513,3 +494,4 @@ def email_gp_report():
 
 if __name__ == "__main__":
     app.run(debug=True)
+
