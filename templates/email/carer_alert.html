@@ -6,7 +6,7 @@
   <li><strong>Most recent medication:</strong> {{ reminder.schedule.med_name }}</li>
   <li><strong>Dosage:</strong> {{ reminder.schedule.dosage }}</li>
   <li><strong>Original time:</strong> {{ reminder.original_due_at.strftime("%Y-%m-%d %H:%M:%S") }}</li>
-  <li><strong>Logged at:</strong> {{ dose_log.logged_at.strftime("%Y-%m-%d %H:%M:%S") }}</li>
+  <li><strong>Logged at:</strong> {{ dose_log.when.strftime("%Y-%m-%d %H:%M:%S") }}</li>
   <li><strong>Status:</strong> {{ dose_log.status }}</li>
 </ul>
 
